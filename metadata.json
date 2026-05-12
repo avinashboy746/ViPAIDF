@@ -1,0 +1,6 @@
+{
+  "name": "VIP AI",
+  "description": "VIP AI - Next-generation master-level developer engine and premium AI assistant.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": []
+}
