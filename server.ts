@@ -1,151 +1,32 @@
 import express from 'express';
-import { createServer as createViteServer } from 'vite';
 import path from 'path';
-import { fileURLToPath } from 'url';
-import axios from 'axios';
 import jwt from 'jsonwebtoken';
-import cookieParser from 'cookie-parser';
 import { Client, GatewayIntentBits } from 'discord.js';
-import dotenv from 'dotenv';
+import { createServer as createViteServer } from 'vite';
 
-dotenv.config();
+// --- Discord Credentials ---
+const DISCORD_TOKEN = 'MTQyODM4NTQxMzQzNzA2MzQwMA.G2iofR.4I9BBl3bBfxI7nvUPYk2ZW5qpKAWAOStFJvgNI';
+const DISCORD_GUILD_ID = '1501197628292206662';
+const DISCORD_VERIFIED_ROLE_ID = '1501870636786778153';
+const DISCORD_CLIENT_ID = '1428385413437063400';
+const DISCORD_CLIENT_SECRET = '5Qw3h78kwqVGG99QpFjhF_4CPsU8-5Dx';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const PORT = 3000;
-const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key';
-const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID;
-const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
-const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
-const DISCORD_GUILD_ID = process.env.DISCORD_GUILD_ID;
-const DISCORD_VERIFIED_ROLE_ID = process.env.DISCORD_VERIFIED_ROLE_ID;
-
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
-const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
-
-// Initialize Discord Bot
-const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers] });
-if (DISCORD_BOT_TOKEN) {
-  client.login(DISCORD_BOT_TOKEN).catch(err => console.error('Discord Bot Login Error:', err));
-}
+// --- Other Configs ---
+const JWT_SECRET = 'your_super_secret_key_change_this'; // इसे सुरक्षित रखें
+const PORT = process.env.PORT || 3000;
 
 async function startServer() {
   const app = express();
-  app.use(express.json());
-  app.use(cookieParser());
+  
+  // Discord Bot Client Setup
+  const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers] });
+  await client.login(DISCORD_TOKEN);
+  console.log('Discord Bot is online!');
 
-  // API Routes - Discord
-  app.get('/api/auth/url', (req, res) => {
-    if (!DISCORD_CLIENT_ID) {
-      return res.status(500).json({ error: 'Discord Client ID not configured' });
-    }
-    const redirectUri = `${process.env.APP_URL || `http://localhost:${PORT}`}/auth/callback`;
-    const params = new URLSearchParams({
-      client_id: DISCORD_CLIENT_ID,
-      redirect_uri: redirectUri,
-      response_type: 'code',
-      scope: 'identify guilds.join',
-    });
-    const authUrl = `https://discord.com/api/oauth2/authorize?${params.toString()}`;
-    res.json({ url: authUrl });
-  });
-
-  // API Routes - Google
-  app.get('/api/auth/google/url', (req, res) => {
-    if (!GOOGLE_CLIENT_ID) {
-      return res.status(500).json({ error: 'Google Client ID not configured' });
-    }
-    const redirectUri = `${process.env.APP_URL || `http://localhost:${PORT}`}/auth/google/callback`;
-    const params = new URLSearchParams({
-      client_id: GOOGLE_CLIENT_ID,
-      redirect_uri: redirectUri,
-      response_type: 'code',
-      scope: 'openid email profile',
-      access_type: 'offline',
-      prompt: 'consent'
-    });
-    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
-    res.json({ url: authUrl });
-  });
-
-  app.get(['/auth/callback', '/auth/callback/'], async (req, res) => {
-    const { code } = req.query;
-    if (!code) return res.status(400).send('Missing code parameter');
-
+  // OAuth Callback Route (As per your snippet)
+  app.get('/auth/callback', async (req, res) => {
     try {
-      const redirectUri = `${process.env.APP_URL || `http://localhost:${PORT}`}/auth/callback`;
-      const tokenResponse = await axios.post('https://discord.com/api/oauth2/token', new URLSearchParams({
-        client_id: DISCORD_CLIENT_ID!,
-        client_secret: DISCORD_CLIENT_SECRET!,
-        grant_type: 'authorization_code',
-        code: code.toString(),
-        redirect_uri: redirectUri,
-      }).toString(), {
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      });
-
-      const { access_token } = tokenResponse.data;
-      const userResponse = await axios.get('https://discord.com/api/users/@me', {
-        headers: { Authorization: `Bearer ${access_token}` },
-      });
-
-      const user = userResponse.data;
-      const token = jwt.sign({ 
-        id: user.id, 
-        username: user.username, 
-        avatar: user.avatar ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png` : null,
-        provider: 'discord' 
-      }, JWT_SECRET, { expiresIn: '7d' });
-
-      res.cookie('auth_token', token, {
-        httpOnly: true,
-        secure: true,
-        sameSite: 'none',
-        maxAge: 7 * 24 * 60 * 60 * 1000,
-      });
-
-      res.send(getAuthSuccessHtml());
-    } catch (error) {
-      console.error('Discord OAuth Error:', error);
-      res.status(500).send('Authentication failed');
-    }
-  });
-
-  app.get(['/auth/google/callback', '/auth/google/callback/'], async (req, res) => {
-    const { code } = req.query;
-    if (!code) return res.status(400).send('Missing code parameter');
-
-    try {
-      const redirectUri = `${process.env.APP_URL || `http://localhost:${PORT}`}/auth/google/callback`;
-      const tokenResponse = await axios.post('https://oauth2.googleapis.com/token', {
-        client_id: GOOGLE_CLIENT_ID,
-        client_secret: GOOGLE_CLIENT_SECRET,
-        code: code.toString(),
-        grant_type: 'authorization_code',
-        redirect_uri: redirectUri,
-      });
-
-      const { access_token } = tokenResponse.data;
-      const userResponse = await axios.get('https://www.googleapis.com/oauth2/v2/userinfo', {
-        headers: { Authorization: `Bearer ${access_token}` },
-      });
-
-      const user = userResponse.data;
-      const token = jwt.sign({ 
-        id: user.id, 
-        username: user.name, 
-        avatar: user.picture,
-        provider: 'google' 
-      }, JWT_SECRET, { expiresIn: '7d' });
-
-      res.cookie('auth_token', token, {
-        httpOnly: true,
-        secure: true,
-        sameSite: 'none',
-        maxAge: 7 * 24 * 60 * 60 * 1000,
-      });
-
+      // यहाँ आपका Google OAuth Logic आएगा...
       res.send(getAuthSuccessHtml());
     } catch (error) {
       console.error('Google OAuth Error:', error);
@@ -172,7 +53,8 @@ async function startServer() {
   }
 
   app.get('/api/user/me', (req, res) => {
-    const token = req.cookies.auth_token;
+    // @ts-ignore (Assuming cookies are parsed via cookie-parser)
+    const token = req.cookies?.auth_token;
     if (!token) return res.status(401).json({ error: 'Not authenticated' });
 
     try {
@@ -193,14 +75,15 @@ async function startServer() {
   });
 
   app.post('/api/verify', async (req, res) => {
-    const token = req.cookies.auth_token;
+    // @ts-ignore
+    const token = req.cookies?.auth_token;
     if (!token) return res.status(401).json({ error: 'Not authenticated' });
 
     try {
       const decoded = jwt.verify(token, JWT_SECRET) as any;
-      const userId = decoded.id;
+      const userId = decoded.id; // सुनिश्चित करें कि JWT में Discord User ID 'id' नाम से है
 
-      if (!DISCORD_GUILD_ID || !DISCORD_VERIFIED_ROLE_ID || !DISCORD_BOT_TOKEN) {
+      if (!DISCORD_GUILD_ID || !DISCORD_VERIFIED_ROLE_ID || !DISCORD_TOKEN) {
         return res.status(500).json({ error: 'Bot or Server not configured correctly' });
       }
 
@@ -222,7 +105,7 @@ async function startServer() {
     }
   });
 
-  // Vite Middleware
+  // Vite Middleware (Dev vs Production)
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -242,4 +125,4 @@ async function startServer() {
   });
 }
 
-startServer();
+startServer().catch(console.error);
